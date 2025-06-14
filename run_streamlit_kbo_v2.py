@@ -13,7 +13,7 @@ CATEGORY_LABELS = {
     "starter": "① 선발투수",
     "recent_form": "② 최근 성적",
     "head_to_head": "③ 상대 전적",
-    "home_away": "④ 홈/원정"
+    "home_away": "④ 홈/우정"
 }
 
 @st.cache_data
@@ -45,7 +45,7 @@ def get_recent_team_record(schedule_df, team_name, current_date):
 def show_pitcher_stats(df_stats, pitcher_name, opponent_team, selected_date):
     df = df_stats[df_stats["선수명"] == pitcher_name].copy()
     if df.empty:
-        st.info("📭 기록 없음")
+        st.info("📍 기본 기록 없음")
         return 0.0
     df["ERA"] = pd.to_numeric(df["ERA"], errors="coerce")
     recent_games = df[df["날짜"] < selected_date].sort_values("날짜", ascending=False)
@@ -54,7 +54,7 @@ def show_pitcher_stats(df_stats, pitcher_name, opponent_team, selected_date):
         last_pitch_date = recent_games.iloc[0]["날짜"]
         days_diff = (selected_date - last_pitch_date).days
         if days_diff == 1:
-            st.warning(f"⚠️ {pitcher_name}은 어제({last_pitch_date.date()}) 등판")
+            st.warning(f"⚠️ {pitcher_name}은 여전({last_pitch_date.date()}) 등판")
             fatigue_penalty = 0.50
         elif days_diff == 2:
             fatigue_penalty = 0.35
@@ -97,21 +97,17 @@ def run_app():
         return
 
     pitchers, stats, schedule = load_data()
-    selected_date = st.date_input("🗓️ 날짜 선택", value=datetime(2025, 6, 5))
+    selected_date = st.date_input("🗓️ 날짜 선택", value=datetime(2025, 6, 14))
     selected_date = pd.to_datetime(selected_date)
-
-    # 수동 리프레시 버튼
-    st.markdown("### 🛠️ 선발 변경 시 리프레시 필요")
-    if st.button("🔄 리프레시 (수동)"):
-        try:
-            st.rerun()
-        except AttributeError:
-            st.experimental_rerun()
 
     matches_today = schedule[schedule["date"] == selected_date]
     if matches_today.empty:
         st.info("해당 날짜에 경기가 없습니다.")
         return
+
+    has_result = not matches_today[["home_score", "away_score"]].isnull().any(axis=1).all()
+    if has_result:
+        st.warning("⚠️ 해당 날짜는 경기 결과가 이미 존재합니다. 베팅은 불가능하며 결과만 확인할 수 있습니다.")
 
     results = []
 
@@ -123,24 +119,10 @@ def run_app():
         with colh:
             home_pitchers = pitchers[pitchers["팀명"].str.contains(home_team)]["선수명"].tolist()
             home_selected = st.selectbox(f"{home_team} 선발", home_pitchers, key=f"{home_team}_{i}")
-            prev_home = st.session_state.get(f"prev_{home_team}_{i}", "")
-            if home_selected != prev_home:
-                st.session_state[f"prev_{home_team}_{i}"] = home_selected
-                try:
-                    st.rerun()
-                except AttributeError:
-                    st.experimental_rerun()
             hw, _, hl = get_recent_team_record(schedule, home_team, selected_date)
         with cola:
             away_pitchers = pitchers[pitchers["팀명"].str.contains(away_team)]["선수명"].tolist()
             away_selected = st.selectbox(f"{away_team} 선발", away_pitchers, key=f"{away_team}_{i}")
-            prev_away = st.session_state.get(f"prev_{away_team}_{i}", "")
-            if away_selected != prev_away:
-                st.session_state[f"prev_{away_team}_{i}"] = away_selected
-                try:
-                    st.rerun()
-                except AttributeError:
-                    st.experimental_rerun()
             aw, _, al = get_recent_team_record(schedule, away_team, selected_date)
 
         fatigue_home = show_pitcher_stats(stats, home_selected, away_team, selected_date)
@@ -155,9 +137,12 @@ def run_app():
 
         st.markdown(f"🔮 **예상 승률**: 홈 {home_prob*100:.1f}%, 무 {draw_prob*100:.1f}%, 원정 {away_prob*100:.1f}%")
 
-        bet = st.radio("📌 선택", ["홈 승", "무승부", "원정 승"], horizontal=True, key=f"bet_{home_team}_{away_team}_{i}")
-        amount = st.number_input("💰 베팅 금액", 1000, value=10000, step=1000, key=f"amount_{i}")
-        odds = st.number_input("📈 배당률", 1.01, value=1.95, step=0.01, key=f"odds_{i}")
+        if not has_result:
+            bet = st.radio("📌 선택", ["홈 승", "무승부", "원정 승"], horizontal=True, key=f"bet_{home_team}_{away_team}_{i}")
+            amount = st.number_input("💰 베팅 금액", 1000, value=10000, step=1000, key=f"amount_{i}")
+            odds = st.number_input("📈 배당률", 1.01, value=1.95, step=0.01, key=f"odds_{i}")
+        else:
+            bet, amount, odds = None, 0, 0
 
         prob = home_prob if bet == "홈 승" else draw_prob if bet == "무승부" else away_prob
         expected_win = amount * odds * prob
@@ -179,7 +164,7 @@ def run_app():
             "EV": expected_value
         })
 
-    if st.button("🎯 모든 경기 베팅 확정 결과 보기"):
+    if not has_result and st.button("🎯 모든 경기 베팅 확정 결과 보기"):
         df = pd.DataFrame(results)
         st.dataframe(df)
 
