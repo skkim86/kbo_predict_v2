@@ -13,8 +13,31 @@ CATEGORY_LABELS = {
     "starter": "① 선발투수",
     "recent_form": "② 최근 성적",
     "head_to_head": "③ 상대 전적",
-    "home_away": "④ 홈/우정"
+    "home_away": "④ 홈/원정"
 }
+
+# 6월 14일 기준 선발투수 디폴트 설정
+DEFAULT_STARTERS = {
+    "LG": "임찬규",
+    "한화": "폰세",
+    "롯데": "감보아",
+    "SSG": "김광현",
+    "키움": "알칸타라",
+    "두산": "최승용",
+    "KIA": "양현종",
+    "NC": "신영우",
+    "KT": "쿠에바스",
+    "삼성": "후라도"
+}
+
+def force_rerun():
+    try:
+        st.rerun()
+    except AttributeError:
+        try:
+            st._rerun()
+        except:
+            st.warning("⚠️ 자동 리프레시 실패: Streamlit 버전 확인 필요")
 
 @st.cache_data
 def load_data():
@@ -45,7 +68,7 @@ def get_recent_team_record(schedule_df, team_name, current_date):
 def show_pitcher_stats(df_stats, pitcher_name, opponent_team, selected_date):
     df = df_stats[df_stats["선수명"] == pitcher_name].copy()
     if df.empty:
-        st.info("📍 기본 기록 없음")
+        st.info("📭 기록 없음")
         return 0.0
     df["ERA"] = pd.to_numeric(df["ERA"], errors="coerce")
     recent_games = df[df["날짜"] < selected_date].sort_values("날짜", ascending=False)
@@ -54,7 +77,7 @@ def show_pitcher_stats(df_stats, pitcher_name, opponent_team, selected_date):
         last_pitch_date = recent_games.iloc[0]["날짜"]
         days_diff = (selected_date - last_pitch_date).days
         if days_diff == 1:
-            st.warning(f"⚠️ {pitcher_name}은 여전({last_pitch_date.date()}) 등판")
+            st.warning(f"⚠️ {pitcher_name}은 어제({last_pitch_date.date()}) 등판")
             fatigue_penalty = 0.50
         elif days_diff == 2:
             fatigue_penalty = 0.35
@@ -83,6 +106,10 @@ def evaluate_betting_combinations(results):
 def run_app():
     st.set_page_config("KBO 예측 시스템", layout="wide")
     st.title("⚾ KBO 경기 베팅 예측")
+
+    st.markdown("""---\n### 🔄 수동 리프레시\n투수 변경 후 화면이 반영되지 않으면 아래 버튼을 눌러주세요.""")
+    if st.button("🔁 새로고침"):
+        force_rerun()
 
     col1, col2 = st.columns(2)
     with col1:
@@ -118,11 +145,24 @@ def run_app():
         colh, cola = st.columns(2)
         with colh:
             home_pitchers = pitchers[pitchers["팀명"].str.contains(home_team)]["선수명"].tolist()
-            home_selected = st.selectbox(f"{home_team} 선발", home_pitchers, key=f"{home_team}_{i}")
+            default_home = DEFAULT_STARTERS.get(home_team, None)
+            home_index = home_pitchers.index(default_home) if default_home in home_pitchers else 0
+            home_selected = st.selectbox(f"{home_team} 선발", home_pitchers, index=home_index, key=f"{home_team}_{i}")
+            prev_home = st.session_state.get(f"prev_{home_team}_{i}", "")
+            if home_selected != prev_home:
+                st.session_state[f"prev_{home_team}_{i}"] = home_selected
+                force_rerun()
             hw, _, hl = get_recent_team_record(schedule, home_team, selected_date)
+
         with cola:
             away_pitchers = pitchers[pitchers["팀명"].str.contains(away_team)]["선수명"].tolist()
-            away_selected = st.selectbox(f"{away_team} 선발", away_pitchers, key=f"{away_team}_{i}")
+            default_away = DEFAULT_STARTERS.get(away_team, None)
+            away_index = away_pitchers.index(default_away) if default_away in away_pitchers else 0
+            away_selected = st.selectbox(f"{away_team} 선발", away_pitchers, index=away_index, key=f"{away_team}_{i}")
+            prev_away = st.session_state.get(f"prev_{away_team}_{i}", "")
+            if away_selected != prev_away:
+                st.session_state[f"prev_{away_team}_{i}"] = away_selected
+                force_rerun()
             aw, _, al = get_recent_team_record(schedule, away_team, selected_date)
 
         fatigue_home = show_pitcher_stats(stats, home_selected, away_team, selected_date)
